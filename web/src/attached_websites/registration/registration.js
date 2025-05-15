@@ -1,9 +1,9 @@
-import { Routes, Route, Link, useNavigate } from "react-router-dom";
+import { Routes, Route, Link, useNavigate, useLocation } from "react-router-dom";
 import { useState,useEffect } from "react";
 import "./registration.css"
 
 const HARDWARE_API = process.env.REACT_APP_HARDWARE_API;
-const WEBSOCKET_URL = process.env.REACT_APP_WEBSOCKET_URL;
+const API_URL = process.env.REACT_APP_API_URL;
 
 const QRScannerUSB = () => {
   const [scannedData, setScannedData] = useState(null);
@@ -74,7 +74,7 @@ const QRScannerUSB = () => {
         return;
     }
 
-    fetch(`${HARDWARE_API}/voting-api/qr-api.php`, {
+    fetch(`http://192.168.1.146/voting-api/qr-api.php`, {
       method: 'POST',
       headers: {
           "Content-Type": "application/json",
@@ -89,6 +89,9 @@ const QRScannerUSB = () => {
               alert("Voter data recorded successfully!");
           } else {
               alert("Error: " + data.error);
+	      if (data.error === "Student ID already registered") {
+        	  navigate("/registration");
+	      }
           }
       })
       .catch((error) => {
@@ -113,7 +116,7 @@ const QRScannerUSB = () => {
           <p><strong>Program:</strong> {scannedData?.program || "N/A"}</p>
           <button className="next-button" onClick={() => {
             sendToDatabase(scannedData);
-            navigate("/registration/fingerprint");
+            navigate("/registration/fingerprint" , { state: scannedData });
           }}>
             Next
           </button>
@@ -161,19 +164,20 @@ const Fingerprint = () => {
   const [hideRegisterButton, setHideRegisterButton] = useState(false);
 
   const navigate = useNavigate();
+  const location = useLocation();
+  const scannedData = location.state; // This is the data passed from QRScannerUSB
+
 
   // Step 1: Initialize scanner
   useEffect(() => {
     const initializeScanner = async () => {
+
       try {
-        const response = await fetch(`${HARDWARE_API}/voting-api/run_fingerprint.php`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Ngrok-Skip-Browser-Warning": "true",
-            },
-            body: JSON.stringify({ action: "initialize" }),
-        });
+        const response = await fetch(`${HARDWARE_API}/initialize`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" }
+});
+
     
         const data = await response.json(); // Parse JSON response
     
@@ -195,62 +199,71 @@ const Fingerprint = () => {
 
   // Step 2: Trigger scanner to register fingerprint
   const registerFingerprint = async () => {
-    if (!scannerReady) {
-      alert("Scanner is not ready. Please wait.");
-      return;
-    }
+  if (!scannerReady) {
+    alert("Scanner is not ready. Please wait.");
+    return;
+  }
 
-    setIsRegistering(true);
-    setShowScanPrompt(true);
-    setHideRegisterButton(true); // Hide the Register button
+  if (!scannedData) {
+    alert("No student data found. Please scan the QR code again.");
+    return;
+  }
 
-    try {
-      const response = await fetch(`${HARDWARE_API}/voting-api/run_fingerprint.php`, {
-          method: "POST",
-          headers: {
-              "Content-Type": "application/json",
-              "Ngrok-Skip-Browser-Warning": "true",
-          },
-          body: JSON.stringify({ action: "register" }),
-      });
-  
-      const data = await response.json(); // Parse JSON response
-  
-      if (!data.success) {
-          alert("Fingerprint registration failed: " + data.message);
-          setHideRegisterButton(false); // Allow retry
-      }
-    } catch (error) {
-        console.error("Error registering fingerprint:", error);
-        alert("An error occurred during fingerprint registration.");
-        setHideRegisterButton(false); // Allow retry
-    } finally {
-        setIsRegistering(false);
-    } 
-  };
+  setIsRegistering(true);
+  setShowScanPrompt(true);
+  setHideRegisterButton(true);
+
+  try {
+    const response = await fetch(`${HARDWARE_API}/enroll`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        student_id: scannedData.student_id,
+        student_name: scannedData.student_name
+      }),
+    });
+
+    const data = await response.json();
+
+    if (data.status === "enrolled") {
+      setFingerprintSaved(true);
+      setStudentCheckComplete(true);
+    } else {
+    alert("Fingerprint registration failed: " + data.message);
+    setHideRegisterButton(false);
+}
+  } catch (error) {
+    console.error("Error registering fingerprint:", error);
+    alert("An error occurred during fingerprint registration.");
+    setHideRegisterButton(false);
+  } finally {
+    setIsRegistering(false);
+  }
+};
+
 
   // Step 3: Poll for hash_saved status
-  useEffect(() => {
-    const socket = new WebSocket(WEBSOCKET_URL);
+// useEffect(() => {
+//    const socket = new WebSocket("ws://localhost:8081");
 
-    socket.onopen = () => {
-      console.log("WebSocket connected");
-    };
+//    socket.onopen = () => {
+//      console.log("WebSocket connected");
+//    };
 
-    socket.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === "hash_saved") {
-        setFingerprintSaved(true);
-        setStudentCheckComplete(true);
-      }
-    };
+//    socket.onmessage = (event) => {
+//      const data = JSON.parse(event.data);
+//      if (data.type === "hash_saved") {
+//        setFingerprintSaved(true);
+//        setStudentCheckComplete(true);
+//      }
+//    };
 
-    socket.onclose = () => {
-      console.log("WebSocket disconnected");
-    };
+//    socket.onclose = () => {
+//      console.log("WebSocket disconnected");
+//    };
 
-    return () => socket.close();
-  }, []);
+//    return () => socket.close();
+//  }, []);
 
   return (
     <div className="container">
@@ -292,13 +305,15 @@ const Fingerprint = () => {
 };
 
 const Success = () => {
+  const navigate = useNavigate();
+
   useEffect(() => {
     const closeScannerApp = async () => {
       try {
-        const response = await fetch(`${HARDWARE_API}/voting-api/close_scanner.php`, {
+        const response = await fetch(`http://localhost/voting-api/close_scanner.php`, {
             method: "POST",
             headers: {
-                "Ngrok-Skip-Browser-Warning": "true",
+                
             },
         });
     
@@ -310,7 +325,13 @@ const Success = () => {
     };
 
     closeScannerApp();
-  }, []);
+
+    const timer = setTimeout(() => {
+      navigate("/registration");
+    }, 2000); // Redirect after 2 seconds
+
+    return () => clearTimeout(timer); // Cleanup
+  }, [navigate]);
 
   return (
     <div className="container">

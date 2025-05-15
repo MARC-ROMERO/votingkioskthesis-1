@@ -1,32 +1,30 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import "../styles/login.css";
+import ResetPasswordModal from "./ResetPasswordModal";
 
 function Login() {
     const [isMobile, setIsMobile] = useState(false);
     const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
     const [error, setError] = useState("");
+    const [showResetModal, setShowResetModal] = useState(false);
     const navigate = useNavigate();
 
     const API_URL = process.env.REACT_APP_API_URL || "http://localhost:9000";
 
     useEffect(() => {
-        // Check screen width when component mounts
         setIsMobile(window.innerWidth <= 768);
 
-        // Add event listener for window resize
         const handleResize = () => setIsMobile(window.innerWidth <= 768);
         window.addEventListener("resize", handleResize);
 
-        // Cleanup event listener on unmount
         return () => window.removeEventListener("resize", handleResize);
     }, []);
 
     const handleLogin = async (e) => {
         e.preventDefault();
         try {
-            console.log(API_URL)
             const response = await fetch(`${API_URL}/api/signin`, {
                 method: "POST",
                 headers: {
@@ -36,22 +34,18 @@ function Login() {
             });
 
             const data = await response.json();
-            console.log("Login Response:", data);
 
             if (response.ok && data.token) {
                 localStorage.setItem("adminToken", data.token);
-                console.log("Token saved:", data.token);
                 navigate("/admin");
             } else {
                 setError(data.error || "Login failed");
             }
         } catch (error) {
-            console.error("Error:", error);
             setError("An error occurred while logging in.");
         }
     };
 
-    // Show message on mobile devices
     if (isMobile) {
         return (
             <div className="mobile-message-container">
@@ -89,13 +83,22 @@ function Login() {
                             onChange={(e) => setPassword(e.target.value)} 
                             required 
                         />
-
+                        <button
+                            type="button"
+                            onClick={() => setShowResetModal(true)} // Open the modal
+                        >
+                            Reset Password
+                        </button>
                         {error && <p className="error">{error}</p>}
 
                         <button type="submit">Login</button>
                     </form>
                 </div>
             </div>
+            <ResetPasswordModal 
+                showModal={showResetModal} 
+                setShowModal={setShowResetModal} 
+            />
         </div>
     );
 }

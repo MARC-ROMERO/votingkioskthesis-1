@@ -6,7 +6,7 @@ const API_URL = process.env.REACT_APP_API_URL;
 
 const fetchCandidates = async () => {
   try {
-    const response = await fetch(`${API_URL}/api/get-all-candidates`, {
+    const response = fetch(`${API_URL}/api/get-all-candidates`, {
       method: "GET",
       headers: {"Ngrok-Skip-Browser-Warning": "true",}
     });
@@ -19,29 +19,6 @@ const fetchCandidates = async () => {
   } catch (error) {
     console.error("Error fetching candidates:", error);
     return [];
-  }
-};
-
-const fetchVoterInfo = async (studentId) => {
-  try {
-      const response = await fetch(`${API_URL}/api/get-voter/${studentId}`, {
-        method: "GET",
-        headers: {"Ngrok-Skip-Browser-Warning": "true",}
-      });
-      
-      const data = await response.json();
-
-        if (data.error) {
-            throw new Error(data.error);  // This handles "Voter not found" or other errors returned by the backend.
-        }
-
-        if (parseInt(data.has_voted) === 1) {
-          throw new Error("Student has already voted.");
-        }
-
-      return data;
-  } catch (error) {
-      throw error;
   }
 };
 
@@ -71,7 +48,7 @@ const ScanPopup = ({ voterInfo, onNext }) => (
     </div>
   </div>
 );
-
+ 
 const VotingPage = ({ title, candidates, onVote, onBack, showControls }) => (
   <div className="governor-container">
       <h1 className="governor-title">{title}</h1>
@@ -177,18 +154,6 @@ function Voting() {
     fetchCandidates().then(setCandidates).catch(console.error).finally(() => setIsLoading(false));
   }, []);
 
-  // useEffect(() => {
-  //   if (page === "home") {
-  //     const fakeInfo = {  
-  //       student_id: "2021102614",
-  //       student_name: "Test Student",
-  //       program: "Bachelor of Science in Computer Engineering",
-  //       has_voted: false,
-  //     };
-  //     handleScan(fakeInfo);
-  //   }
-  // }, [page]); 
-
   useEffect(() => {
     fetch(`${API_URL}/api/get-election-status`, {
       method: "GET",
@@ -205,96 +170,81 @@ function Voting() {
       .catch(() => setPage("inactive"));
   }, []);
 
+  const handleStudentIDSubmit = (id, info) => {
+    setStudentID(id);
+    setVoterInfo(info);
+    setPage("scan");
+  };
+
   // Handle Scan directly without fetching again
   const handleScan = (infoFromScan) => {
     if (infoFromScan.has_voted) {
       alert("You have already voted.");
-      setPage("scan");
-    } else {  
+      setPage("home");
+    } else {
       setStudentInfo(infoFromScan);
-      fetchVoterInfo(infoFromScan.student_id)
-      .then((voterData) => {
-        // Do something with voterData if needed
-        setVoterInfo(voterData);
-        setPage("governor");
-      })
-      .catch((error) => {
-        console.error(error);
-        alert(error.message || "Failed to fetch voter info.");
-        setPage("scan"); // optional: go back if there's an error
-      });
+      setVoterInfo(infoFromScan);
+      setPage("governor");
     }
+
   };
 
-  const handleVote = (position, name) => {
-    // For Board Member, we use the dynamically set `showBM`
-    const positionName = position === "Board Member" ? `BM ${showBM}` : position;
-  
-    // Find the selected candidate from the fetched candidates
-    const candidate = candidates.find(c => c.name === name && c.position === positionName);
-  
-    // If the candidate is found, store the position_name
-    const updatedSelections = selections.filter(s => s.position !== position); // Remove previous selection
-    updatedSelections.push({ position, name: candidate ? candidate.position_name : "" });
-  
-    setSelections(updatedSelections); // Update selections
-  
-    if (position === "Governor") {
-      setPage("vice-governor");
-    } else if (position === "Vice Governor") {
-      setPage("board-member");
-    } else if (position === "Board Member") {
-      setShowPopup(true);  // Show the summary popup after the Board Member vote
-    }
-  };
-  
+ const handleVote = (position, name) => {
+  const updatedSelections = selections.filter(s => s.position !== position);
+  updatedSelections.push({ position, name });
+  setSelections(updatedSelections);
+
+  if (position === "Governor") {
+    setPage("vice-governor");
+  } else if (position === "Vice Governor") {
+    setPage("board-member");
+  } else if (position.startsWith("BM")) {  // Correct condition for Board Member
+    setShowPopup(true);
+  }
+};
+
+
   const handleSubmit = async () => {
-    // Fetch selections
-    const governor = selections.find(s => s.position === "Governor")?.name || "";
-    const viceGovernor = selections.find(s => s.position === "Vice Governor")?.name || "";
-    const boardMember = selections.find(s => s.position === "Board Member")?.name || "";
+  const governor = selections.find(s => s.position === "Governor")?.name || "";
+  const viceGovernor = selections.find(s => s.position === "Vice Governor")?.name || "";
+  const boardMember = selections.find(s => s.position === `BM ${showBM}`)?.name || "";
 
-    // Ensure that the value sent for each vote is just the `position_name`, not a double-prefix.
-    const governorVote = governor ? `Governor_${governor.split('_')[1]}` : "";
-    const viceGovernorVote = viceGovernor ? `Vice Governor_${viceGovernor.split('_')[1]}` : "";
-    const boardMemberVote = boardMember ? `BM ${showBM}_${boardMember.split('_')[1]}` : "";
+  const governorVote = `Governor_${governor}`;
+  const viceGovernorVote = `Vice Governor_${viceGovernor}`;
+  const boardMemberVote = `BM ${showBM}_${boardMember}`;
 
-    // Construct the payload
-    const payload = {
-      governor_vote: governorVote,
-      vice_governor_vote: viceGovernorVote,
-      board_member_vote: boardMemberVote,
-      program: voterInfo.program,
-      student_id: voterInfo.student_id
-    };
-
-    try {
-      console.log("Submitting payload:", payload);
-
-      const response = await fetch(`${API_URL}/api/post-vote`, {
-          method: 'POST',
-          headers: {
-              'Content-Type': 'application/json',
-              "Ngrok-Skip-Browser-Warning": "true"
-          },
-          body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) {
-          const errorData = await response.json();
-          alert(`Failed to submit votes: ${errorData.error}`);
-          return;
-      }
-
-      alert('Votes successfully submitted!');
-      } catch (error) {
-          console.error('Error submitting votes:', error);
-          alert('An error occurred while submitting votes.');
-      } finally {
-        setShowPopup(false);
-        setPage("completed");
-      }
+  const payload = {
+    governor_vote: governorVote,
+    vice_governor_vote: viceGovernorVote,
+    board_member_vote: boardMemberVote,
+    program: voterInfo.program,
+    student_id: voterInfo.student_id,
   };
+
+  try {
+    const response = await fetch(`${API_URL}/api/post-vote`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        "Ngrok-Skip-Browser-Warning": "true"
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      alert(`Failed to submit votes: ${errorData.error}`);
+      return;
+    }
+  } catch (error) {
+    console.error('Error submitting votes:', error);
+    alert('An error occurred while submitting votes.');
+  } finally {
+    setShowPopup(false);
+    setPage("completed");
+  }
+};
+
 
   if (isLoading) {
     return <div className="loading-container"><h2>Loading...</h2></div>;
@@ -315,7 +265,7 @@ function Voting() {
 
   return (
     <div className="app-container white-background">
-      {page === "home" && <ElectionBanner onVote={() => setPage("governor")} />}
+      {page === "home" && <ElectionBanner onVote={() => setPage("qr-scan")} />}
       {page === "qr-scan" && <ScanPage onScan={handleScan} onBack={() => setPage("governor")} />}
       {page === "governor" && (
         <VotingPage
@@ -335,14 +285,15 @@ function Voting() {
         />
       )}
       {page === "board-member" && (
-        <VotingPage
-          title={`Board Member ${showBM}`}
-          candidates={candidates.filter(c => c.position === `BM ${showBM}`)}
-          onVote={(name) => handleVote("Board Member", name)}
-          onBack={() => setPage("vice-governor")}
-          showControls={true}
-        />
-      )}
+  <VotingPage
+    title={`Board Member ${showBM}`}
+    candidates={candidates.filter(c => c.position === `BM ${showBM}`)}
+    onVote={(name) => handleVote(`BM ${showBM}`, name)} // Use correct position
+    onBack={() => setPage("vice-governor")}
+    showControls={true}
+  />
+)}
+
       {showPopup && page === "board-member" && <SummaryPopup selections={selections} onCancel={() => setShowPopup(false)} onSubmit={handleSubmit} />}
       {page === "completed" && <CompletedPage onDone={() => setPage("home")} />}
     </div>
